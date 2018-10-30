@@ -45,7 +45,7 @@ public class Gui extends Application {
         toolLabel.textProperty().bind(toolProperty);
 
         final VBox commandBox = new VBox();
-
+        commandBox.setFillWidth(true);
 
         ListView<String> classNameListView = new ListView<>();
         classNameListView.setItems(classNames);
@@ -79,7 +79,12 @@ public class Gui extends Application {
             final ArgumentEntryLine argumentEntryLine = new ArgumentEntryLine(stage, a);
             values.add(argumentEntryLine);
             commandBox.getChildren().add(argumentEntryLine.getNode());
+
         });
+
+        commandBox.getChildren().add(new Separator());
+
+
 
         final Button runButton = new Button("Run");
 
@@ -99,7 +104,6 @@ public class Gui extends Application {
             main.instanceMain(Stream.concat(Stream.of(toolName), args).toArray(String[]::new));
         });
 
-
         commandBox.getChildren().add(runButton);
     }
 
@@ -109,15 +113,14 @@ public class Gui extends Application {
         private final Stage stage;
         private final CommandLineArgumentParser.ArgumentDefinition argumentDefinition;
         private final Label label;
-        private int i = 0;
+        private final ChoiceBox<Enum<?>> choice;
+        private final StringExpression argumentValue;
 
         public ArgumentEntryLine(Stage stage, CommandLineArgumentParser.ArgumentDefinition argumentDefinition) {
             this.stage = stage;
             this.argumentDefinition = argumentDefinition;
             root.setSpacing(10);
-
-            textField = new TextField();
-            textField.setPromptText(argumentDefinition.type.getSimpleName());
+            root.setPrefWidth(800);
 
             label = new Label(argumentDefinition.getLongName());
 
@@ -125,16 +128,42 @@ public class Gui extends Application {
             Tooltip.install(root, tip);
 
             final ObservableList<Node> rootChildren = root.getChildren();
-            rootChildren.add(textField);
+
+            if (argumentDefinition.type.isEnum()){
+                final Enum<?>[] enumConstants = ((Class<Enum<?>>) argumentDefinition.type).getEnumConstants();
+                choice = new ChoiceBox<>(FXCollections.observableArrayList(Arrays.asList(enumConstants)));
+                choice.setPrefWidth(500);
+                rootChildren.add(choice);
+                argumentValue = Bindings.createStringBinding(() -> choice.getValue().toString(), choice.valueProperty());
+                textField = null;
+            } else {
+                choice = null;
+
+                textField = new TextField();
+                textField.setPromptText(argumentDefinition.type.getSimpleName());
+
+
+                argumentValue = textField.textProperty();
+                if (isFilelike(argumentDefinition)) {
+                    textField.setPrefWidth(430);
+                    final HBox subBox = new HBox(textField, getFileSelectButton());
+                    subBox.setSpacing(0);
+                    rootChildren.add(subBox);
+                } else {
+                    textField.setPrefWidth(500);
+                    rootChildren.add(textField);
+                }
+            }
             rootChildren.add(label);
 
-            if (isFilelike(argumentDefinition)) {
-                rootChildren.add(getFileSelectButton());
-            }
+
+
+
         }
 
         private Button getFileSelectButton(){
             final Button select = new Button("Select");
+            select.setPrefWidth(70);
             select.setOnAction(event -> {
                 FileChooser fileChooser = new FileChooser();
                 fileChooser.setTitle("Select Input");
@@ -155,19 +184,15 @@ public class Gui extends Application {
         }
 
         public StringExpression getCommandLineString(){
-            return textField.textProperty();
+            return argumentValue;
         }
 
         public String getText(){
-            return textField.getText();
+            return argumentValue.getValue();
         }
 
         public String getArgument(){
             return "--" + argumentDefinition.getLongName();
-        }
-
-        public BooleanBinding isEmpty(){
-            return textField.textProperty().isEmpty();
         }
 
     }
