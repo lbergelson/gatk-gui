@@ -1,0 +1,19 @@
+plugins {
+	id "java"
+	id "application"
+}
+
+repositories {
+    mavenCentral()
+    jcenter()
+
+    maven {
+        url "https://broadinstitute.jfrog.io/broadinstitute/libs-snapshot/" //for htsjdk snapshots
+    }
+
+    mavenLocal()
+}
+
+dependencies {
+	implementation 'org.broadinstitute:gatk:4.0.11.0-8-g3c44798-SNAPSHOT'
+}
