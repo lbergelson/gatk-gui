@@ -1,8 +1,11 @@
 package org.broadinstitute.hellbender.gui;
 
 import javafx.application.Application;
+import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.StringBinding;
+import javafx.beans.binding.StringExpression;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -69,36 +72,30 @@ public class Gui extends Application {
                 .filter(a -> !a.isControlledByPlugin())
                 .collect(Collectors.toList());
 
-
         commandBox.getChildren().clear();
         commandBox.getChildren().add(new Label(toolName));
-        Map<String, TextField> values = new LinkedHashMap<>();
+        ObservableList<ArgumentEntryLine> values = FXCollections.observableArrayList( w -> new Observable[]{ w.getCommandLineString()});
         requiredArguments.forEach(a -> {
-            final TextField text = new TextField();
-            values.put(a.getLongName(), text);
-            Node inputField = createInputFieldSet(stage, a);
-            commandBox.getChildren().add(inputField);
+            final ArgumentEntryLine argumentEntryLine = new ArgumentEntryLine(stage, a);
+            values.add(argumentEntryLine);
+            commandBox.getChildren().add(argumentEntryLine.getNode());
         });
 
         final Button runButton = new Button("Run");
 
-        runButton.setDisable(true);
+        runButton.disableProperty().bind(Bindings.createBooleanBinding(() -> values.stream().anyMatch(a -> a.getText().isEmpty()), values));
 
-        values.values().forEach(
-                text -> text.setOnKeyTyped(e -> checkAllTextBoxes(values.values(), runButton))
-        );
-
-
-        StringBinding argumentListBinding = new ArgumentBinding(values);
+        StringBinding argumentListBinding = Bindings.createStringBinding(() -> values.stream()
+                .map(a -> a.getText().isEmpty() ? "" : a.getArgument() + " " + a.getText())
+                .collect(Collectors.joining(" ")), values);
 
         Label arglist = new Label();
         arglist.textProperty().bind(Bindings.concat(toolName, " ", argumentListBinding));
         commandBox.getChildren().add(arglist);
 
         runButton.setOnAction( action -> {
-            final Stream<String> args = values.entrySet()
-                    .stream()
-                    .flatMap(e -> Stream.of("--" + e.getKey(), e.getValue().getText()));
+            final Stream<String> args = values.stream()
+                    .flatMap(e -> Stream.of(e.getArgument(), e.getText()));
             main.instanceMain(Stream.concat(Stream.of(toolName), args).toArray(String[]::new));
         });
 
@@ -106,70 +103,80 @@ public class Gui extends Application {
         commandBox.getChildren().add(runButton);
     }
 
-    private Node createInputFieldSet(Stage stage, TextField text, CommandLineArgumentParser.ArgumentDefinition argDef) {
-        text.setPromptText(argDef.type.getSimpleName());
-        final HBox argLine = new HBox(text, new Label(argDef.getLongName()));
-        if( argDef.type == File.class || isFilish(argDef.getLongName())){
+    private static class ArgumentEntryLine {
+        private final HBox root = new HBox();
+        private final TextField textField;
+        private final Stage stage;
+        private final CommandLineArgumentParser.ArgumentDefinition argumentDefinition;
+        private final Label label;
+        private int i = 0;
+
+        public ArgumentEntryLine(Stage stage, CommandLineArgumentParser.ArgumentDefinition argumentDefinition) {
+            this.stage = stage;
+            this.argumentDefinition = argumentDefinition;
+            root.setSpacing(10);
+
+            textField = new TextField();
+            textField.setPromptText(argumentDefinition.type.getSimpleName());
+
+            label = new Label(argumentDefinition.getLongName());
+
+            Tooltip tip = new Tooltip(argumentDefinition.doc);
+            Tooltip.install(root, tip);
+
+            final ObservableList<Node> rootChildren = root.getChildren();
+            rootChildren.add(textField);
+            rootChildren.add(label);
+
+            if (isFilelike(argumentDefinition)) {
+                rootChildren.add(getFileSelectButton());
+            }
+        }
+
+        private Button getFileSelectButton(){
             final Button select = new Button("Select");
             select.setOnAction(event -> {
                 FileChooser fileChooser = new FileChooser();
                 fileChooser.setTitle("Select Input");
                 File selectedFile = fileChooser.showOpenDialog(stage);
                 if (selectedFile != null) {
-                    text.setText(selectedFile.getPath());
+                    textField.setText(selectedFile.getPath());
                 }
             });
-            argLine.getChildren().add(select);
+            return select;
         }
 
-        if (isCollectionField(argDef.field)) {
-            final Button addMoreButton = new Button("+");
-
-        }
-        argLine.setSpacing(10);
-        Tooltip tip = new Tooltip(argDef.doc);
-        Tooltip.install(argLine, tip);
-        return argLine;
-    }
-
-
-    private static class ArgumentEntryLine {
-        private final HBox root = new HBox();
-        private final TextField textField = new TextField();
-
-        ArgumentEntryLine(Stage stage, CommandLineArgumentParser.ArgumentDefinition argumentDefinition){
-
+        private static boolean isFilelike(CommandLineArgumentParser.ArgumentDefinition argDef) {
+            return argDef.type == File.class || isFilish(argDef.getLongName());
         }
 
+        public Node getNode(){
+            return root;
+        }
+
+        public StringExpression getCommandLineString(){
+            return textField.textProperty();
+        }
+
+        public String getText(){
+            return textField.getText();
+        }
+
+        public String getArgument(){
+            return "--" + argumentDefinition.getLongName();
+        }
+
+        public BooleanBinding isEmpty(){
+            return textField.textProperty().isEmpty();
+        }
 
     }
-    private void checkAllTextBoxes(Collection<TextField> values, Button run) {
-        run.setDisable(values.stream().anyMatch(v -> v.getText().isEmpty()));
-    }
 
-    private boolean isFilish(String name){
+    private static boolean isFilish(String name){
         final Set<String> fileish = new HashSet<>(Arrays.asList("input", "output", "reference", "variant"));
         return fileish.contains(name);
     }
 
-    private static class ArgumentBinding extends StringBinding {
-
-        private final Map<String, TextField> values;
-
-        public ArgumentBinding(Map<String, TextField> values) {
-            this.values = values;
-            values.values().forEach(e -> super.bind(e.textProperty())
-            );
-        }
-
-        @Override
-        protected String computeValue() {
-            return values.entrySet().stream()
-                    .filter(e -> !e.getValue().getText().isEmpty())
-                    .flatMap(e -> Stream.of("--" + e.getKey(), e.getValue().getText()))
-                    .collect(Collectors.joining(" "));
-        }
-    }
 
     private static boolean isCollectionField(final Field field) {
         try {
