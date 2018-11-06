@@ -14,6 +14,9 @@ repositories {
     mavenLocal()
 }
 
+mainClassName = "org.broadinstitute.hellbender.gui.Gui"
+
+
 dependencies {
 	implementation 'org.broadinstitute:gatk:4.0.11.0-8-g3c44798-SNAPSHOT'
 }

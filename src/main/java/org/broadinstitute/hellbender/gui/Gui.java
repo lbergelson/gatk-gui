@@ -3,7 +3,6 @@ package org.broadinstitute.hellbender.gui;
 import javafx.application.Application;
 import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
-import javafx.beans.binding.BooleanBinding;
 import javafx.beans.binding.StringBinding;
 import javafx.beans.binding.StringExpression;
 import javafx.beans.property.SimpleStringProperty;
@@ -21,7 +20,6 @@ import org.broadinstitute.barclay.argparser.CommandLineArgumentParser;
 import org.broadinstitute.hellbender.Main;
 import org.broadinstitute.hellbender.cmdline.CommandLineProgram;
 
-
 import java.io.File;
 import java.lang.reflect.Field;
 import java.util.*;
@@ -36,9 +34,8 @@ public class Gui extends Application {
     private boolean canRun = false;
 
     @Override
-    public void start(Stage stage) throws Exception {
-        ObservableList<String> classNames = FXCollections.observableArrayList(
-                commandLineClasses.keySet());
+    public void start(Stage stage) {
+        ObservableList<String> classNames = FXCollections.observableArrayList(commandLineClasses.keySet());
 
         final Label toolLabel = new Label();
         final SimpleStringProperty toolProperty = new SimpleStringProperty();
@@ -83,8 +80,6 @@ public class Gui extends Application {
         });
 
         commandBox.getChildren().add(new Separator());
-
-
 
         final Button runButton = new Button("Run");
 
@@ -155,10 +150,6 @@ public class Gui extends Application {
                 }
             }
             rootChildren.add(label);
-
-
-
-
         }
 
         private Button getFileSelectButton(){
@@ -194,14 +185,12 @@ public class Gui extends Application {
         public String getArgument(){
             return "--" + argumentDefinition.getLongName();
         }
-
     }
 
     private static boolean isFilish(String name){
         final Set<String> fileish = new HashSet<>(Arrays.asList("input", "output", "reference", "variant"));
         return fileish.contains(name);
     }
-
 
     private static boolean isCollectionField(final Field field) {
         try {
