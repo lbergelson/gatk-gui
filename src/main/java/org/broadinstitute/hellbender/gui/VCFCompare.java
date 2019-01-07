@@ -1,13 +1,14 @@
 package org.broadinstitute.hellbender.gui;
 
-import avro.shaded.com.google.common.collect.Lists;
+import com.google.common.collect.Lists;
 import com.sun.javafx.scene.control.skin.TableViewSkin;
+import htsjdk.samtools.util.CloseableIterator;
+import htsjdk.samtools.util.PeekableIterator;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext;
-import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import javafx.application.Application;
-import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
@@ -22,29 +23,30 @@ import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import javafx.util.Callback;
-import org.broadinstitute.hellbender.engine.FeatureDataSource;
+import javafx.util.Pair;
+import org.broadinstitute.hellbender.engine.FeatureInput;
+import org.broadinstitute.hellbender.engine.MultiVariantDataSource;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.Collection;
-import java.util.List;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class VCFCompare extends Application {
 
-    private String left = "/Users/louisb/Workspace/gatk/src/test/resources/org/broadinstitute/hellbender/tools/walkers/variantutils/SelectVariants/vcf4.1.example.vcf";
-    private String right = "/Users/louisb/Workspace/gatk/src/test/resources/org/broadinstitute/hellbender/tools/walkers/variantutils/SelectVariants/vcf4.1.example.vcf";
+    private FeatureInput<VariantContext> left = new FeatureInput<VariantContext>("testData/left.vcf", "left", Collections.emptyMap());
+    private FeatureInput<VariantContext> right = new FeatureInput<VariantContext>("testData/right.vcf", "right", Collections.emptyMap());
 
-
-    private FeatureDataSource<VariantContext> dataSource = new FeatureDataSource<VariantContext>(left);
-    private List<VariantContext> variants = Lists.newArrayList(dataSource.iterator());
-    private VCFHeader header = (VCFHeader)dataSource.getHeader();
-
+    private final MultiVariantDataSource dataSource = new MultiVariantDataSource(Arrays.asList(left, right), 1000);
+    private final CloseableIterator<Pair<VariantContext, VariantContext>> variantIter = new DiffIterator(dataSource.iterator(), left.getName(), right.getName());
+    private final List<Pair<VariantContext, VariantContext>> variants = Lists.newArrayList(variantIter);
     private TableView table = new TableView();
+
     public static void main(String[] args) {
         launch(args);
     }
@@ -72,7 +74,7 @@ public class VCFCompare extends Application {
         scrollPane.setContent(table);
         scrollPane.setFitToWidth(true);
         scrollPane.setFitToHeight(true);
-        scrollPane.setPrefSize(1200, 500);
+        scrollPane.setPrefSize(stage.getWidth(), stage.getHeight());
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
         HBox.setHgrow(scrollPane, Priority.ALWAYS);
 
@@ -105,7 +107,7 @@ public class VCFCompare extends Application {
         vbox.getChildren().add(siteLabel);
         vbox.getChildren().add(flowPane);
         vbox.setPadding(new Insets(10, 0, 0, 10));
-
+        
 
         getSiteSpecificCheckBoxes(columns, flowPane);
 
@@ -124,7 +126,7 @@ public class VCFCompare extends Application {
 
     private ObservableList<TableColumn> getColumns() {
         ObservableList<TableColumn> columns = FXCollections.observableArrayList();
-        final Collection<VCFInfoHeaderLine> infoHeaderLines = header.getInfoHeaderLines();
+        final Collection<VCFInfoHeaderLine> infoHeaderLines = dataSource.getHeader().getInfoHeaderLines();
 
         final TableColumn position = new TableColumn("Position");
         position.getColumns().add(getTableColumn(VariantContext::getContig, "Chrom"));
@@ -153,10 +155,22 @@ public class VCFCompare extends Application {
                                      return new TableCell(){
                                          @Override
                                          protected void updateItem(Object item, boolean empty) {
-                                             String value = (String)item;
+                                             Pair<String, String> value = (Pair<String, String>)item;
                                              VBox vbox = new VBox();
-                                             vbox.getChildren().addAll(new Label(value), new Label("lable2"));
-                                             this.setGraphic(vbox);
+                                             if( value != null) {
+                                                 final String left = value.getKey();
+                                                 final String right = value.getValue();
+                                                 if (Objects.equals(left, right)) {
+                                                     vbox.getChildren().add(new Label(left));
+                                                 } else {
+                                                     final Label leftLabel = new Label(left);
+                                                     leftLabel.setTextFill(Color.RED);
+                                                     final Label rightLabel = new Label(right);
+                                                     rightLabel.setTextFill(Color.RED);
+                                                     vbox.getChildren().addAll(leftLabel, rightLabel);
+                                                 }
+                                                 this.setGraphic(vbox);
+                                             }
                                          }
                                      };
                                  }
@@ -165,11 +179,13 @@ public class VCFCompare extends Application {
         return chrom;
     }
 
-    private Callback<TableColumn.CellDataFeatures<VariantContext, String>, ObservableValue<String>> getCellFactory(Function<VariantContext, String> getter) {
-        return (Callback<TableColumn.CellDataFeatures<VariantContext, String>, ObservableValue<String>>) p -> {
-                    // p.getValue() returns the Person instance for a particular TableView row
-            return new SimpleStringProperty(getter.apply(p.getValue()));
-                };
+    private Callback<TableColumn.CellDataFeatures<Pair<VariantContext, VariantContext>, Pair<String,String>>, ObservableValue<Pair<String,String>>> getCellFactory(Function<VariantContext, String> getter) {
+        return p -> {
+            Pair<VariantContext, VariantContext> value = p.getValue();
+            String leftString = value.getKey() == null ? null : getter.apply(value.getKey());
+            String rightString = value.getValue() == null ? null : getter.apply(value.getValue());
+            return new SimpleObjectProperty<>(new Pair<>(leftString, rightString));
+        };
     }
 
     private static Method columnToFitMethod;
@@ -197,4 +213,59 @@ public class VCFCompare extends Application {
             }
         });
     }
+
+    private static class DiffIterator implements CloseableIterator<Pair<VariantContext, VariantContext>>{
+        private final PeekableIterator<VariantContext> iterator;
+        private final String left;
+        private final String right;
+
+        private DiffIterator(Iterator<VariantContext> iterator, String left, String right) {
+            this.iterator = new PeekableIterator<>(iterator);
+            this.left = left;
+            this.right = right;
+        }
+
+
+        @Override
+        public void close() {
+            iterator.close();;
+        }
+
+        @Override
+        public boolean hasNext() {
+            return iterator.hasNext();
+        }
+
+        @Override
+        public Pair<VariantContext, VariantContext> next() {
+            if( hasNext()){
+                VariantContext next = iterator.next();
+                next.getSource();
+                final VariantContext peek = iterator.peek();
+                VariantContext tmpLeft = null;
+                VariantContext tmpRight = null;
+//                if( next.getSource().equals(left)){
+//                    tmpLeft = next;
+//                } else if ( next.getSource().equals(right)){
+//                    tmpRight = next;
+//                }
+                tmpLeft = next;
+                if(next.getContig().equals(peek.getContig()) && next.getStart() == peek.getStart()){
+                    next = iterator.next();
+                    tmpRight = next;
+//                    if( next.getSource().equals(left)){
+//                        tmpLeft = next;
+//                    } else if ( next.getSource().equals(right)){
+//                        tmpRight = next;
+//                    }
+                }
+                return new Pair<>(tmpLeft, tmpRight);
+            } else {
+                throw new NoSuchElementException();
+            }
+        }
+
+
+    }
+
 }
