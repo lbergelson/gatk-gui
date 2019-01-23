@@ -43,9 +43,9 @@ public class VCFCompare extends Application {
     private FeatureInput<VariantContext> right = new FeatureInput<VariantContext>("testData/right.vcf", "right", Collections.emptyMap());
 
     private final MultiVariantDataSource dataSource = new MultiVariantDataSource(Arrays.asList(left, right), 1000);
-    private final CloseableIterator<Pair<VariantContext, VariantContext>> variantIter = new DiffIterator(dataSource.iterator(), left.getName(), right.getName());
-    private final List<Pair<VariantContext, VariantContext>> variants = Lists.newArrayList(variantIter);
-    private TableView table = new TableView();
+    private final CloseableIterator<VariantDiffPair> variantIter = new DiffIterator(dataSource.iterator(), left.getName(), right.getName());
+    private final List<VariantDiffPair> variants = Lists.newArrayList(variantIter);
+    private TableView<VariantDiffPair> table = new TableView<>();
 
     public static void main(String[] args) {
         launch(args);
@@ -65,7 +65,7 @@ public class VCFCompare extends Application {
 
         table.setEditable(true);
 
-        ObservableList<TableColumn> columns = getColumns();
+        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = getColumns();
 
         table.getColumns().addAll(columns);
         table.setItems(FXCollections.observableArrayList(variants));
@@ -93,7 +93,7 @@ public class VCFCompare extends Application {
     }
 
     public Node controlPane(){
-        final ObservableList<TableColumn<?,?>> columns = table.getColumns();
+        final ObservableList<TableColumn<VariantDiffPair,?>> columns = table.getColumns();
         ScrollPane scrollPane = new ScrollPane();
         final VBox vbox = new VBox();
         vbox.setFillWidth(true);
@@ -107,7 +107,7 @@ public class VCFCompare extends Application {
         vbox.getChildren().add(siteLabel);
         vbox.getChildren().add(flowPane);
         vbox.setPadding(new Insets(10, 0, 0, 10));
-        
+
 
         getSiteSpecificCheckBoxes(columns, flowPane);
 
@@ -115,7 +115,7 @@ public class VCFCompare extends Application {
         return scrollPane;
     }
 
-    private void getSiteSpecificCheckBoxes(ObservableList<TableColumn<?, ?>> columns, FlowPane flowPane) {
+    private void getSiteSpecificCheckBoxes(ObservableList<TableColumn<VariantDiffPair, ?>> columns, FlowPane flowPane) {
         columns.forEach( column -> {
             final CheckBox check = new CheckBox(column.getText());
             check.setSelected(true);
@@ -124,11 +124,11 @@ public class VCFCompare extends Application {
         });
     }
 
-    private ObservableList<TableColumn> getColumns() {
-        ObservableList<TableColumn> columns = FXCollections.observableArrayList();
+    private ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> getColumns() {
+        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = FXCollections.observableArrayList();
         final Collection<VCFInfoHeaderLine> infoHeaderLines = dataSource.getHeader().getInfoHeaderLines();
 
-        final TableColumn position = new TableColumn("Position");
+        final TableColumn<VariantDiffPair, DiffDisplay> position = new TableColumn<>("Position");
         position.getColumns().add(getTableColumn(VariantContext::getContig, "Chrom"));
         position.getColumns().add(getTableColumn(v -> String.valueOf(v.getStart()), "Start"));
         columns.add(position);
@@ -146,20 +146,19 @@ public class VCFCompare extends Application {
         return columns;
     }
 
-    private TableColumn getTableColumn(Function<VariantContext, String> getContig, String label) {
-        final TableColumn chrom = new TableColumn(label);
+    private TableColumn<VariantDiffPair, DiffDisplay> getTableColumn(Function<VariantContext, String> getContig, String label) {
+        final TableColumn<VariantDiffPair, DiffDisplay> chrom = new TableColumn<>(label);
 
-        chrom.setCellFactory(new Callback<TableColumn, TableCell>() {
+        chrom.setCellFactory(new Callback<TableColumn<VariantDiffPair, DiffDisplay>, TableCell<VariantDiffPair, DiffDisplay>>() {
                                  @Override
-                                 public TableCell call(TableColumn param) {
-                                     return new TableCell(){
+                                 public TableCell<VariantDiffPair, DiffDisplay> call(TableColumn<VariantDiffPair, DiffDisplay> param) {
+                                     return new TableCell<VariantDiffPair, DiffDisplay>(){
                                          @Override
-                                         protected void updateItem(Object item, boolean empty) {
-                                             Pair<String, String> value = (Pair<String, String>)item;
+                                         protected void updateItem(DiffDisplay item, boolean empty) {
                                              VBox vbox = new VBox();
-                                             if( value != null) {
-                                                 final String left = value.getKey();
-                                                 final String right = value.getValue();
+                                             if( item != null) {
+                                                 final String left = item.getKey();
+                                                 final String right = item.getValue();
                                                  if (Objects.equals(left, right)) {
                                                      vbox.getChildren().add(new Label(left));
                                                  } else {
@@ -179,13 +178,8 @@ public class VCFCompare extends Application {
         return chrom;
     }
 
-    private Callback<TableColumn.CellDataFeatures<Pair<VariantContext, VariantContext>, Pair<String,String>>, ObservableValue<Pair<String,String>>> getCellFactory(Function<VariantContext, String> getter) {
-        return p -> {
-            Pair<VariantContext, VariantContext> value = p.getValue();
-            String leftString = value.getKey() == null ? null : getter.apply(value.getKey());
-            String rightString = value.getValue() == null ? null : getter.apply(value.getValue());
-            return new SimpleObjectProperty<>(new Pair<>(leftString, rightString));
-        };
+    private Callback<TableColumn.CellDataFeatures<VariantDiffPair, DiffDisplay>, ObservableValue<DiffDisplay>> getCellFactory(Function<VariantContext, String> getter) {
+        return p -> new SimpleObjectProperty<>(p.getValue().getDisplay(getter));
     }
 
     private static Method columnToFitMethod;
@@ -214,7 +208,7 @@ public class VCFCompare extends Application {
         });
     }
 
-    private static class DiffIterator implements CloseableIterator<Pair<VariantContext, VariantContext>>{
+    private static class DiffIterator implements CloseableIterator<VariantDiffPair>{
         private final PeekableIterator<VariantContext> iterator;
         private final String left;
         private final String right;
@@ -237,7 +231,7 @@ public class VCFCompare extends Application {
         }
 
         @Override
-        public Pair<VariantContext, VariantContext> next() {
+        public VariantDiffPair next() {
             if( hasNext()){
                 VariantContext next = iterator.next();
                 next.getSource();
@@ -259,13 +253,46 @@ public class VCFCompare extends Application {
 //                        tmpRight = next;
 //                    }
                 }
-                return new Pair<>(tmpLeft, tmpRight);
+                return new VariantDiffPair(tmpLeft, tmpRight);
             } else {
                 throw new NoSuchElementException();
             }
         }
 
 
+    }
+
+    public static class VariantDiffPair extends Pair<VariantContext, VariantContext>{
+
+        /**
+         * Creates a new pair
+         *
+         * @param key   The key for this pair
+         * @param value The value to use for this pair
+         */
+        public VariantDiffPair(VariantContext key, VariantContext value) {
+            super(key, value);
+        }
+
+        public DiffDisplay getDisplay(Function<VariantContext, String> getter) {
+            String leftString = getKey() == null ? null : getter.apply(getKey());
+            String rightString = getValue() == null ? null : getter.apply(getValue());
+            return new DiffDisplay(leftString, rightString);
+        }
+
+    }
+
+    public static class DiffDisplay extends Pair<String, String> {
+
+        /**
+         * Creates a new pair
+         *
+         * @param key   The key for this pair
+         * @param value The value to use for this pair
+         */
+        public DiffDisplay(String key, String value) {
+            super(key, value);
+        }
     }
 
 }
