@@ -16,15 +16,12 @@ import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
-import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.layout.FlowPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
+import javafx.scene.paint.Paint;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import javafx.util.Callback;
@@ -37,13 +34,14 @@ import org.broadinstitute.hellbender.gui.diff.iterators.PositionMatchingPairIter
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class VCFCompare extends Application {
 
-    private FeatureInput<VariantContext> left = new FeatureInput<VariantContext>("testData/left.vcf", "left", Collections.emptyMap());
-    private FeatureInput<VariantContext> right = new FeatureInput<VariantContext>("testData/right.vcf", "right", Collections.emptyMap());
+    private FeatureInput<VariantContext> left = new FeatureInput<VariantContext>("testData/oldqual.vcf", "left", Collections.emptyMap());
+    private FeatureInput<VariantContext> right = new FeatureInput<VariantContext>("testData/newqual.vcf", "right", Collections.emptyMap());
 
     private final MultiVariantDataSource dataSource = new MultiVariantDataSource(Arrays.asList(left, right), 1000);
     private final CloseableIterator<VariantDiffPair> variantIter = new PositionMatchingPairIterator(dataSource.iterator(),
@@ -86,55 +84,65 @@ public class VCFCompare extends Application {
 
     @Override
     public void start(Stage stage) {
-        Scene scene = new Scene(new Group());
+        Scene scene = new Scene(new AnchorPane());
 
         stage.setTitle("Table View Sample");
         stage.setWidth(1200);
         stage.setHeight(500);
 
-        TabPane tabs = new TabPane();
-        final Label label = new Label("VCF View");
-        label.setFont(new Font("Arial", 20));
-        final HBox topBar = new HBox();
-        topBar.setSpacing(10);
-        topBar.getChildren().addAll(label, getFilterSettings());
+        initTable();
 
-        table.setEditable(true);
+        TabPane tabs = new TabPane(getViewTab(), makeNewTab("Select", controlPane(table)));
+        setGrow(tabs);
+        final VBox anchorPane = new VBox(new Label("hello"));
+        anchorPane.setBackground(new Background(new BackgroundFill(Paint.valueOf("YELLOW"), null, null)));
+        anchorPane.setFillWidth(true);
 
-        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = getColumns();
-
-        table.getColumns().addAll(columns);
-        setTableItems(variants);
-
-        ScrollPane scrollPane = new ScrollPane();
-        scrollPane.setContent(table);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setFitToHeight(true);
-        scrollPane.setPrefSize(stage.getWidth(), stage.getHeight());
-        VBox.setVgrow(scrollPane, Priority.ALWAYS);
-        HBox.setHgrow(scrollPane, Priority.ALWAYS);
-
-
-        final VBox vbox = new VBox();
-        vbox.setSpacing(5);
-        vbox.setPadding(new Insets(10, 0, 0, 10));
-        vbox.getChildren().addAll(topBar, scrollPane);
-
-        final Tab viewTab = new Tab("View", vbox);
-        viewTab.setClosable(false);
-        tabs.getTabs().add(viewTab);
-
-        final Tab selectTab = new Tab("Select", controlPane(table));
-        selectTab.setClosable(false);
-
-        tabs.getTabs().add(selectTab);
-
-        ((Group) scene.getRoot()).getChildren().addAll(tabs);
+        setGrow(anchorPane);
+        scene.setRoot(tabs);
         stage.setScene(scene);
         stage.show();
 
         hideColumnsWithCondition(table, DiffDisplay::isEmpty);
 
+    }
+
+    private void colorBackground(TabPane tabs, String color) {
+        tabs.setBackground(new Background(new BackgroundFill(Paint.valueOf(color), null, null)));
+    }
+
+    private void initTable() {
+        table.setEditable(true);
+        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = getColumns();
+        table.getColumns().addAll(columns);
+        setTableItems(variants);
+    }
+
+    private Tab makeNewTab(String tabName, Node tabRoot) {
+        final Tab tab = new Tab(tabName, tabRoot);
+        tab.setClosable(false);
+        return tab;
+    }
+
+    private Tab getViewTab() {
+        final Label label = new Label("VCF View");
+        label.setFont(new Font("Arial", 20));
+        final HBox topBar = new HBox(label, getFilterSettings());
+        topBar.setSpacing(10);
+
+        setGrow(table);
+        final VBox viewTabRoot = new VBox(topBar, table);
+        viewTabRoot.setSpacing(5);
+        viewTabRoot.setPadding(new Insets(10, 0, 0, 10));
+        setGrow(viewTabRoot);
+
+
+        return makeNewTab("View", viewTabRoot);
+    }
+
+    private static void setGrow(Node node) {
+        VBox.setVgrow(node, Priority.ALWAYS);
+        HBox.setHgrow(node, Priority.ALWAYS);
     }
 
     private static void hideColumnsWithCondition(TableView<VariantDiffPair> table, Predicate<DiffDisplay> include) {
@@ -220,7 +228,7 @@ public class VCFCompare extends Application {
         return columns;
     }
 
-    private TableColumn<VariantDiffPair, DiffDisplay> getTableColumn(FieldKey key, String label) {
+    private TableColumn<VariantDiffPair, DiffDisplay> getTableColumn(Function<VariantContext, String> key, String label) {
         final TableColumn<VariantDiffPair, DiffDisplay> chrom = new TableColumn<>(label);
 
         chrom.setCellFactory(new Callback<TableColumn<VariantDiffPair, DiffDisplay>, TableCell<VariantDiffPair, DiffDisplay>>() {
@@ -240,7 +248,7 @@ public class VCFCompare extends Application {
         return chrom;
     }
 
-    private Callback<TableColumn.CellDataFeatures<VariantDiffPair, DiffDisplay>, ObservableValue<DiffDisplay>> getCellFactory(FieldKey key) {
+    private Callback<TableColumn.CellDataFeatures<VariantDiffPair, DiffDisplay>, ObservableValue<DiffDisplay>> getCellFactory(Function<VariantContext, String> key) {
         return p -> new SimpleObjectProperty<>(p.getValue().getDisplay(key));
     }
 
