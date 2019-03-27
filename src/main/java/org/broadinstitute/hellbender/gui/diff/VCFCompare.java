@@ -6,6 +6,7 @@ import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
+import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import javafx.application.Application;
@@ -21,13 +22,13 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.Paint;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 import javafx.util.Pair;
 import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.MultiVariantDataSource;
+import org.broadinstitute.hellbender.gui.JavaFxUtils;
 import org.broadinstitute.hellbender.gui.diff.iterators.FilteringIterator;
 import org.broadinstitute.hellbender.gui.diff.iterators.PositionMatchingPairIterator;
 
@@ -40,8 +41,8 @@ import java.util.stream.Collectors;
 
 public class VCFCompare extends Application {
 
-    private FeatureInput<VariantContext> left = new FeatureInput<VariantContext>("testData/oldqual.vcf", "left", Collections.emptyMap());
-    private FeatureInput<VariantContext> right = new FeatureInput<VariantContext>("testData/newqual.vcf", "right", Collections.emptyMap());
+    private FeatureInput<VariantContext> left = new FeatureInput<>("testData/oldqual.vcf", "left", Collections.emptyMap());
+    private FeatureInput<VariantContext> right = new FeatureInput<>("testData/newqual.vcf", "right", Collections.emptyMap());
 
     private final MultiVariantDataSource dataSource = new MultiVariantDataSource(Arrays.asList(left, right), 1000);
     private final CloseableIterator<VariantDiffPair> variantIter = new PositionMatchingPairIterator(dataSource.iterator(),
@@ -60,9 +61,12 @@ public class VCFCompare extends Application {
 
     /**
      * get the checkbox to determine if the table is filtered or not
-     * @return
+     *
+     * sets up a change listener on the filter checkbox which updates variants when it's clicked on and off
+     * @return the filter setting check box
+     * @param variants
      */
-    public Node getFilterSettings() {
+    public Node getFilterSettings(List<VariantDiffPair> variants) {
         final VBox vBox = new VBox();
         final CheckBox onlyDifferences = new CheckBox("Only Differences");
         onlyDifferences.setSelected(false);
@@ -84,7 +88,7 @@ public class VCFCompare extends Application {
 
     @Override
     public void start(Stage stage) {
-        Scene scene = new Scene(new AnchorPane());
+        final Scene scene = new Scene(new Pane());
 
         stage.setTitle("Table View Sample");
         stage.setWidth(1200);
@@ -92,57 +96,43 @@ public class VCFCompare extends Application {
 
         initTable();
 
-        TabPane tabs = new TabPane(getViewTab(), makeNewTab("Select", controlPane(table)));
-        setGrow(tabs);
-        final VBox anchorPane = new VBox(new Label("hello"));
-        anchorPane.setBackground(new Background(new BackgroundFill(Paint.valueOf("YELLOW"), null, null)));
-        anchorPane.setFillWidth(true);
+        final TabPane tabs = new TabPane(getViewTab(table), makeNewTab("Select", controlPane(table)));
 
-        setGrow(anchorPane);
         scene.setRoot(tabs);
         stage.setScene(scene);
         stage.show();
-
-        hideColumnsWithCondition(table, DiffDisplay::isEmpty);
-
     }
 
-    private void colorBackground(TabPane tabs, String color) {
-        tabs.setBackground(new Background(new BackgroundFill(Paint.valueOf(color), null, null)));
-    }
-
+    /**
+     * initialize the diff table with variants
+     */
     private void initTable() {
         table.setEditable(true);
-        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = getColumns();
+        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = buildColumns();
         table.getColumns().addAll(columns);
         setTableItems(variants);
+        hideColumnsWithCondition(table, DiffDisplay::isEmpty);
     }
 
-    private Tab makeNewTab(String tabName, Node tabRoot) {
+    private static Tab makeNewTab(String tabName, Node tabRoot) {
         final Tab tab = new Tab(tabName, tabRoot);
         tab.setClosable(false);
         return tab;
     }
 
-    private Tab getViewTab() {
+    private Tab getViewTab(TableView<VariantDiffPair> table) {
         final Label label = new Label("VCF View");
         label.setFont(new Font("Arial", 20));
-        final HBox topBar = new HBox(label, getFilterSettings());
+        final HBox topBar = new HBox(label, getFilterSettings(variants));
         topBar.setSpacing(10);
 
-        setGrow(table);
-        final VBox viewTabRoot = new VBox(topBar, table);
+        JavaFxUtils.expandToFillParent(table);
+        final VBox viewTabRoot = new VBox(topBar, this.table);
         viewTabRoot.setSpacing(5);
         viewTabRoot.setPadding(new Insets(10, 0, 0, 10));
-        setGrow(viewTabRoot);
-
+        JavaFxUtils.expandToFillParent(viewTabRoot);
 
         return makeNewTab("View", viewTabRoot);
-    }
-
-    private static void setGrow(Node node) {
-        VBox.setVgrow(node, Priority.ALWAYS);
-        HBox.setHgrow(node, Priority.ALWAYS);
     }
 
     private static void hideColumnsWithCondition(TableView<VariantDiffPair> table, Predicate<DiffDisplay> include) {
@@ -166,14 +156,17 @@ public class VCFCompare extends Application {
         }
     }
 
-
-
     private void setTableItems(List<VariantDiffPair> variants) {
         table.setItems(FXCollections.observableArrayList(variants));
         table.refresh();
     }
 
-    public static Node controlPane(TableView<VariantDiffPair> table){
+    /**
+     * build the pane which contains table view settings
+     * @param table
+     * @return
+     */
+    private static Node controlPane(TableView<VariantDiffPair> table){
         final ObservableList<TableColumn<VariantDiffPair,?>> columns = table.getColumns();
         ScrollPane scrollPane = new ScrollPane();
         final VBox vbox = new VBox();
@@ -190,13 +183,17 @@ public class VCFCompare extends Application {
         vbox.setPadding(new Insets(10, 0, 0, 10));
 
 
-        getSiteSpecificCheckBoxes(columns, flowPane);
+        createColumnCheckBoxes(columns, flowPane);
 
         scrollPane.setContent(vbox);
         return scrollPane;
     }
 
-    private static void getSiteSpecificCheckBoxes(ObservableList<TableColumn<VariantDiffPair, ?>> columns, FlowPane flowPane) {
+    /**
+     * @param columns
+     * @param flowPane
+     */
+    private static void createColumnCheckBoxes(ObservableList<TableColumn<VariantDiffPair, ?>> columns, FlowPane flowPane) {
         columns.forEach( column -> {
             final CheckBox check = new CheckBox(column.getText());
             check.setSelected(true);
@@ -206,29 +203,53 @@ public class VCFCompare extends Application {
 
     }
 
-    private ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> getColumns() {
+    /**
+     * create the table columns
+     */
+    private ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> buildColumns() {
         ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = FXCollections.observableArrayList();
-        final Collection<VCFInfoHeaderLine> infoHeaderLines = dataSource.getHeader().getInfoHeaderLines();
+        final VCFHeader header = dataSource.getHeader();
+        final Collection<VCFInfoHeaderLine> infoHeaderLines = header.getInfoHeaderLines();
 
         final TableColumn<VariantDiffPair, DiffDisplay> position = new TableColumn<>("Position");
-        position.getColumns().add(getTableColumn(VariantContext::getContig, "Chrom"));
-        position.getColumns().add(getTableColumn(v -> String.valueOf(v.getStart()), "Start"));
+        position.getColumns().add(makeColumn(VariantContext::getContig, "Chrom"));
+        position.getColumns().add(makeColumn(v -> String.valueOf(v.getStart()), "Start"));
         columns.add(position);
-        columns.add(getTableColumn( v -> v.getReference().getDisplayString(),"Ref"));
-        columns.add(getTableColumn( v -> v.getAlternateAlleles().stream().map(Allele::getDisplayString).collect(
+        columns.add(makeColumn(v -> v.getReference().getDisplayString(), "Ref"));
+        columns.add(makeColumn(v -> v.getAlternateAlleles().stream().map(Allele::getDisplayString).collect(
                 Collectors.joining(",")), "Alt"));
         infoHeaderLines.forEach(line -> {
             final String id = line.getID();
-            columns.add(getTableColumn(v -> {
+            columns.add(makeColumn(v -> {
                 final Object attribute = v.getAttribute(id);
                 return attribute == null ? "" : attribute.toString();
             }, id));
         });
 
+        final Collection<VCFFormatHeaderLine> formatHeaderLines = header.getFormatHeaderLines();
+        final SortedSet<String> samples = dataSource.getSamples();
+        for( String sample: samples){
+            final TableColumn<VariantDiffPair, DiffDisplay> sampleColumn = new TableColumn<>(sample);
+            final ObservableList<TableColumn<VariantDiffPair, ?>> sampleSpecificColumns = sampleColumn.getColumns();
+            for(VCFFormatHeaderLine line : formatHeaderLines){
+                final String id = line.getID();
+                sampleSpecificColumns.add(makeColumn(v -> {
+                    final Genotype genotype = v.getGenotype(sample);
+                    if( genotype != null) {
+                        final Object attribute = v.getAttribute(id);
+                        return attribute == null ? "" : attribute.toString();
+                    } else {
+                        return "";
+                    }
+                }, id));
+            }
+            columns.add(sampleColumn);
+        }
+
         return columns;
     }
 
-    private TableColumn<VariantDiffPair, DiffDisplay> getTableColumn(Function<VariantContext, String> key, String label) {
+    private static TableColumn<VariantDiffPair, DiffDisplay> makeColumn(Function<VariantContext, String> key, String label) {
         final TableColumn<VariantDiffPair, DiffDisplay> chrom = new TableColumn<>(label);
 
         chrom.setCellFactory(new Callback<TableColumn<VariantDiffPair, DiffDisplay>, TableCell<VariantDiffPair, DiffDisplay>>() {
@@ -248,36 +269,9 @@ public class VCFCompare extends Application {
         return chrom;
     }
 
-    private Callback<TableColumn.CellDataFeatures<VariantDiffPair, DiffDisplay>, ObservableValue<DiffDisplay>> getCellFactory(Function<VariantContext, String> key) {
+    private static Callback<TableColumn.CellDataFeatures<VariantDiffPair, DiffDisplay>, ObservableValue<DiffDisplay>> getCellFactory(Function<VariantContext, String> key) {
         return p -> new SimpleObjectProperty<>(p.getValue().getDisplay(key));
     }
-
-    private static Method columnToFitMethod;
-
-    static {
-        try {
-            columnToFitMethod = TableViewSkin.class.getDeclaredMethod("resizeColumnToFitContent", TableColumn.class, int.class);
-            columnToFitMethod.setAccessible(true);
-        } catch (NoSuchMethodException e) {
-            e.printStackTrace();
-        }
-    }
-
-    public static <T> void  autoFitTable(TableView<T> tableView) {
-        tableView.getItems().addListener(new ListChangeListener<T>() {
-            @Override
-            public void onChanged(Change<? extends T> c) {
-                for (TableColumn<T,?> column : tableView.getColumns()) {
-                    try {
-                        columnToFitMethod.invoke(tableView.getSkin(), column, -1);
-                    } catch (IllegalAccessException | InvocationTargetException e) {
-                        e.printStackTrace();
-                    }
-                }
-            }
-        });
-    }
-
 
     public static class DiffDisplay extends Pair<String, String> {
 
