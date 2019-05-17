@@ -1,7 +1,6 @@
 package org.broadinstitute.hellbender.gui.diff;
 
 import com.google.common.collect.Lists;
-import com.sun.javafx.scene.control.skin.TableViewSkin;
 import htsjdk.samtools.util.CloseableIterator;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
@@ -13,7 +12,6 @@ import javafx.application.Application;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
-import javafx.collections.ListChangeListener;
 import javafx.collections.ObservableList;
 import javafx.geometry.HPos;
 import javafx.geometry.Insets;
@@ -29,31 +27,14 @@ import javafx.util.Pair;
 import org.broadinstitute.hellbender.engine.FeatureInput;
 import org.broadinstitute.hellbender.engine.MultiVariantDataSource;
 import org.broadinstitute.hellbender.gui.JavaFxUtils;
-import org.broadinstitute.hellbender.gui.diff.iterators.FilteringIterator;
 import org.broadinstitute.hellbender.gui.diff.iterators.PositionMatchingPairIterator;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public class VCFCompare extends Application {
-
-    private FeatureInput<VariantContext> left = new FeatureInput<>("testData/oldqual.vcf", "left", Collections.emptyMap());
-    private FeatureInput<VariantContext> right = new FeatureInput<>("testData/newqual.vcf", "right", Collections.emptyMap());
-
-    private final MultiVariantDataSource dataSource = new MultiVariantDataSource(Arrays.asList(left, right), 1000);
-    private final CloseableIterator<VariantDiffPair> variantIter = new PositionMatchingPairIterator(dataSource.iterator(),
-                                                                                                    dataSource.getHeader(),
-                                                                                                    left.getName(), right.getName());
-
-    private final CloseableIterator<VariantDiffPair> filteredVariantIter = new FilteringIterator<>(variantIter, VariantDiffPair::mismatching);
-
-    private final List<VariantDiffPair> variants = Lists.newArrayList(variantIter);
-
-    private TableView<VariantDiffPair> table = new TableView<>();
 
     public static void main(String[] args) {
         launch(args);
@@ -65,8 +46,9 @@ public class VCFCompare extends Application {
      * sets up a change listener on the filter checkbox which updates variants when it's clicked on and off
      * @return the filter setting check box
      * @param variants
+     * @param table
      */
-    public Node getFilterSettings(List<VariantDiffPair> variants) {
+    public static Node getFilterSettings(List<VariantDiffPair> variants, TableView<VariantDiffPair> table) {
         final VBox vBox = new VBox();
         final CheckBox onlyDifferences = new CheckBox("Only Differences");
         onlyDifferences.setSelected(false);
@@ -75,9 +57,9 @@ public class VCFCompare extends Application {
                 if (newValue) {
                     setTableItems(variants.stream()
                                           .filter(VariantDiffPair::mismatching)
-                                          .collect(Collectors.toList()));
+                                          .collect(Collectors.toList()), table);
                 } else {
-                    setTableItems(variants);
+                    setTableItems(variants, table);
                 }
             }
         });
@@ -88,15 +70,19 @@ public class VCFCompare extends Application {
 
     @Override
     public void start(Stage stage) {
+
+
         final Scene scene = new Scene(new Pane());
 
         stage.setTitle("Table View Sample");
         stage.setWidth(1200);
         stage.setHeight(500);
 
-        initTable();
-
-        final TabPane tabs = new TabPane(getViewTab(table), makeNewTab("Select", controlPane(table)));
+        final WindowedDiffSource source = new WindowedDiffSource("testData/newqual.vcf", "testData/oldqual.vcf");
+        // private final CloseableIterator<VariantDiffPair> filteredVariantIter = new FilteringIterator<>(variantIter, VariantDiffPair::mismatching);
+        TableView<VariantDiffPair> table = createTable(source);
+        final TabPane tabs = new TabPane(getViewTab(table, source.getDiffs()),
+                                         makeNewTab("Select", controlPane(table)));
 
         scene.setRoot(tabs);
         stage.setScene(scene);
@@ -106,12 +92,13 @@ public class VCFCompare extends Application {
     /**
      * initialize the diff table with variants
      */
-    private void initTable() {
+    private TableView<VariantDiffPair> createTable(WindowedDiffSource source) {
+        final TableView<VariantDiffPair> table = new TableView<>();
         table.setEditable(true);
-        ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = buildColumns();
+        final ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = buildColumns(source.getHeader());
         table.getColumns().addAll(columns);
-        setTableItems(variants);
-        hideColumnsWithCondition(table, DiffDisplay::isEmpty);
+        setTableItems(source.getDiffs(), table);
+        return table;
     }
 
     private static Tab makeNewTab(String tabName, Node tabRoot) {
@@ -120,14 +107,14 @@ public class VCFCompare extends Application {
         return tab;
     }
 
-    private Tab getViewTab(TableView<VariantDiffPair> table) {
+    private static Tab getViewTab(TableView<VariantDiffPair> table, List<VariantDiffPair> variants) {
         final Label label = new Label("VCF View");
         label.setFont(new Font("Arial", 20));
-        final HBox topBar = new HBox(label, getFilterSettings(variants));
+        final HBox topBar = new HBox(label, getFilterSettings(variants, table));
         topBar.setSpacing(10);
 
         JavaFxUtils.expandToFillParent(table);
-        final VBox viewTabRoot = new VBox(topBar, this.table);
+        final VBox viewTabRoot = new VBox(topBar, table);
         viewTabRoot.setSpacing(5);
         viewTabRoot.setPadding(new Insets(10, 0, 0, 10));
         JavaFxUtils.expandToFillParent(viewTabRoot);
@@ -137,28 +124,40 @@ public class VCFCompare extends Application {
 
     private static void hideColumnsWithCondition(TableView<VariantDiffPair> table, Predicate<DiffDisplay> include) {
         final int size = table.getItems().size();
-        for(TableColumn<VariantDiffPair, ?> column : table.getColumns()){
-            boolean allNull = true;
-            boolean allEmpty = true;
-            for(int i = 0; i < size; i++){
-                final ObservableValue<DiffDisplay> cellObservableValue = (ObservableValue<DiffDisplay>)column.getCellObservableValue(i);
-                if (cellObservableValue != null){
-                    allNull = false;
-                    if( !include.test(cellObservableValue.getValue())){
-                        allEmpty = false;
+        hideColumnsWithCondition(include, size, table.getColumns());
+        table.refresh();
+    }
+
+    private static void hideColumnsWithCondition(Predicate<DiffDisplay> include, int size, ObservableList<TableColumn<VariantDiffPair, ?>> columns) {
+        for (TableColumn<VariantDiffPair, ?> column : columns) {
+            if (column.isVisible()) {
+                boolean allNull = true;
+                boolean allEmpty = true;
+                for (int i = 0; i < size; i++) {
+                    final ObservableValue<DiffDisplay> cellObservableValue = (ObservableValue<DiffDisplay>) column.getCellObservableValue(i);
+                    if (cellObservableValue != null) {
+                        allNull = false;
+                        if (!include.test(cellObservableValue.getValue())) {
+                            allEmpty = false;
+                        }
                     }
                 }
-            }
-            if ( !allNull && allEmpty) {
-                System.out.println(column.getText() + " is empty");
-                column.setVisible(false);
+                if (!allNull && allEmpty) {
+                    System.out.println(column.getText() + " is empty");
+                    column.setVisible(false);
+                } else {
+                    if (column.getColumns().size() > 0) {
+                        hideColumnsWithCondition(include, size, column.getColumns());
+                    }
+                }
             }
         }
     }
 
-    private void setTableItems(List<VariantDiffPair> variants) {
+    private static void setTableItems(List<VariantDiffPair> variants, TableView<VariantDiffPair> table) {
         table.setItems(FXCollections.observableArrayList(variants));
-        table.refresh();
+        hideColumnsWithCondition(table, DiffDisplay::isEmpty);
+
     }
 
     /**
@@ -181,7 +180,6 @@ public class VCFCompare extends Application {
         vbox.getChildren().add(siteLabel);
         vbox.getChildren().add(flowPane);
         vbox.setPadding(new Insets(10, 0, 0, 10));
-
 
         createColumnCheckBoxes(columns, flowPane);
 
@@ -206,18 +204,18 @@ public class VCFCompare extends Application {
     /**
      * create the table columns
      */
-    private ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> buildColumns() {
+    private static ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> buildColumns(VCFHeader header) {
         ObservableList<TableColumn<VariantDiffPair, DiffDisplay>> columns = FXCollections.observableArrayList();
-        final VCFHeader header = dataSource.getHeader();
         final Collection<VCFInfoHeaderLine> infoHeaderLines = header.getInfoHeaderLines();
 
         final TableColumn<VariantDiffPair, DiffDisplay> position = new TableColumn<>("Position");
-        position.getColumns().add(makeColumn(VariantContext::getContig, "Chrom"));
+        position.getColumns().add(makeColumn(VariantContext::getContig, "Chr"));
         position.getColumns().add(makeColumn(v -> String.valueOf(v.getStart()), "Start"));
         columns.add(position);
         columns.add(makeColumn(v -> v.getReference().getDisplayString(), "Ref"));
         columns.add(makeColumn(v -> v.getAlternateAlleles().stream().map(Allele::getDisplayString).collect(
                 Collectors.joining(",")), "Alt"));
+        columns.add(makeColumn(v -> String.valueOf(v.getPhredScaledQual()), "Qual"));
         infoHeaderLines.forEach(line -> {
             final String id = line.getID();
             columns.add(makeColumn(v -> {
@@ -227,7 +225,7 @@ public class VCFCompare extends Application {
         });
 
         final Collection<VCFFormatHeaderLine> formatHeaderLines = header.getFormatHeaderLines();
-        final SortedSet<String> samples = dataSource.getSamples();
+        final List<String> samples = header.getSampleNamesInOrder();
         for( String sample: samples){
             final TableColumn<VariantDiffPair, DiffDisplay> sampleColumn = new TableColumn<>(sample);
             final ObservableList<TableColumn<VariantDiffPair, ?>> sampleSpecificColumns = sampleColumn.getColumns();
@@ -436,4 +434,32 @@ public class VCFCompare extends Application {
         }
     }
 
+    private static class WindowedDiffSource {
+        private final FeatureInput<VariantContext> left;
+        private final FeatureInput<VariantContext> right;
+
+        private final MultiVariantDataSource dataSource;
+        private final CloseableIterator<VariantDiffPair> variantIter;
+        private final List<VariantDiffPair> variants;
+        private final VCFHeader header;
+
+        public WindowedDiffSource(String left, String right) {
+            this.left = new FeatureInput<>(left, "left", Collections.emptyMap());
+            this.right = new FeatureInput<>(right, "right", Collections.emptyMap());
+            dataSource = new MultiVariantDataSource(Arrays.asList(this.left, this.right), 1000);
+            variantIter = new PositionMatchingPairIterator(dataSource.iterator(), dataSource.getHeader(), this.left.getName(), this.right.getName());
+            variants = Lists.newArrayList(variantIter);
+
+            //add merged samples to header since this isn't done by MultiVariantDataSource
+            header =  new VCFHeader( dataSource.getHeader().getMetaDataInInputOrder(), dataSource.getSamples());
+        }
+
+        public List<VariantDiffPair> getDiffs(){
+           return variants;
+        }
+
+        public VCFHeader getHeader(){
+            return header;
+        }
+    }
 }
