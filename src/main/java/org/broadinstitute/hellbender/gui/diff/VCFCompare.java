@@ -383,7 +383,7 @@ public class VCFCompare extends Application {
 
     public interface FieldKey{
         public enum FieldType{
-            INFO, FORMAT
+            CORE, INFO, FORMAT
         }
         FieldType getFieldType();
         String getKey();

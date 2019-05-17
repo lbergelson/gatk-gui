@@ -3,17 +3,19 @@ package org.broadinstitute.hellbender.gui.diff;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
+import htsjdk.variant.vcf.VCFFormatHeaderLine;
+import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLine;
+import htsjdk.variant.vcf.VCFInfoHeaderLine;
+import org.broadinstitute.hellbender.exceptions.GATKException;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
-public class KeyedVariantContext {
+public final class KeyedVariantContext {
     private final Map<String, String> coreMap;
-    private Map<String, String> infoMap;
-    private Map<String, Map<String,String>> sampleMap;
+    private final Map<String, String> infoMap;
+    private final Map<String, Map<String,String>> sampleMap;
 
     KeyedVariantContext(VariantContext vc) {
         coreMap = buildCoreMap(vc);
@@ -37,6 +39,7 @@ public class KeyedVariantContext {
         if(genotype.hasDP()) { map.put("DP", Integer.toString(genotype.getDP())); }
         if(genotype.hasGQ()) { map.put("GQ", Integer.toString(genotype.getGQ())); }
         if(genotype.hasPL()) { map.put("PL", Arrays.toString(genotype.getPL())); }
+        if(genotype.isFiltered()) { map.put("FT", genotype.getFilters()); }
         genotype.getExtendedAttributes().forEach( (key, value) -> {
             map.put(key, value.toString());
         });
@@ -62,15 +65,106 @@ public class KeyedVariantContext {
         return Collections.unmodifiableMap(map);
     }
 
-    public Map<String, String> getCoreFields(){
+    private Map<String, String> getCoreFields(){
        return coreMap;
     }
 
-    public Map<String, String> getInfoFields(){
+    private Map<String, String> getInfoFields(){
         return infoMap;
     }
 
-    public Map<String, Map<String, String>> getSampleMap(){
+    private Map<String, Map<String, String>> getSampleMap(){
         return sampleMap;
+    }
+
+    public String getValue(Key k){
+        switch (k.type) {
+            case Core: return getCoreFields().getOrDefault(k.name, "");
+            case Info: return getInfoFields().getOrDefault(k.name, "");
+            case Format: return getSampleMap()
+                    .getOrDefault(k.sample,Collections.emptyMap())
+                    .getOrDefault(k.name,"");
+            default: throw new GATKException("Unknown key type: " + k.type.toString());
+        }
+    }
+
+//    public Set<Key> getKeySet(){
+//        return keySet;
+//    }
+
+    public static Set<Key> getPotentialKeys(VCFHeader vcfHeader){
+        final LinkedHashSet<Key> keys = new LinkedHashSet<>();
+        keys.add(Key.CHROM);
+        keys.add(Key.START);
+        keys.add(Key.ID);
+        keys.add(Key.Ref);
+        keys.add(Key.Alt);
+        keys.add(Key.Qual);
+        keys.add(Key.Filter);
+
+        for(VCFInfoHeaderLine line: vcfHeader.getInfoHeaderLines()){
+            keys.add(Key.info(line.getID()));
+        }
+        for(String sample: vcfHeader.getSampleNamesInOrder()){
+            keys.add(Key.format(sample, "GT"));
+            keys.add(Key.format(sample, "AD"));
+            keys.add(Key.format(sample, "DP"));
+            keys.add(Key.format(sample, "GQ"));
+            keys.add(Key.format(sample, "PL"));
+            keys.add(Key.format(sample, "FT"));
+            for(VCFFormatHeaderLine line: vcfHeader.getFormatHeaderLines()){
+                keys.add(Key.format(sample, line.getID()));
+            }
+        }
+        return Collections.unmodifiableSet(keys);
+    }
+
+    public static class Key {
+
+        static final Key CHROM = core("Chrom");
+        static final Key START = core("Start");
+        static final Key ID = core("ID");
+        static final Key Ref = core("Ref");
+        static final Key Alt = core("Alt");
+        static final Key Qual = core("Qual");
+        static final Key Filter = core("Filter");
+
+        private enum Type { Core, Info, Format}
+        private final Type type;
+        private final String name;
+        private final String sample;
+
+        private Key(Type type, String name, String sample) {
+            this.type = type;
+            this.name = name;
+            this.sample = sample;
+        }
+
+        static Key core(String name){
+            return new Key(Type.Core, name, null);
+        }
+
+        static Key info(String name){
+            return new Key(Type.Info, name, null);
+        }
+
+        static Key format(String sample, String name){
+            return new Key(Type.Format, name, sample);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Key key = (Key) o;
+            return type == key.type &&
+                    Objects.equals(name, key.name) &&
+                    Objects.equals(sample, key.sample);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(type, name, sample);
+        }
     }
 }

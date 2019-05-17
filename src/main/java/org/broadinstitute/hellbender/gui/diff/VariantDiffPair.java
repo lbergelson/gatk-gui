@@ -8,33 +8,31 @@ import javafx.util.Pair;
 import java.util.Objects;
 import java.util.function.Function;
 
-public class VariantDiffPair extends Pair<VariantContext, VariantContext> {
+public class VariantDiffPair {
     private final VCFEncoder encoder;
+    private final VariantContext left;
+    private final VariantContext right;
 
     /**
      * Creates a new pair
-     *
-     * @param key   The key for this pair
-     * @param value The value to use for this pair
      */
-    public VariantDiffPair(VariantContext key, VariantContext value, VCFEncoder encoder, VCFHeader header) {
-        super(key, value);
+    public VariantDiffPair(VariantContext left, VariantContext right, VCFEncoder encoder, VCFHeader header) {
+        this.left = left;
+        this.right = right;
         this.encoder = encoder;
-
     }
 
     public VCFCompare.DiffDisplay getDisplay(Function<VariantContext, String> getter) {
-        String leftString = getKey() == null ? null : getter.apply(getKey());
-        String rightString = getValue() == null ? null : getter.apply(getValue());
+        String leftString = left == null ? null : getter.apply(left);
+        String rightString = right == null ? null : getter.apply(right);
         return new VCFCompare.DiffDisplay(leftString, rightString);
     }
 
     public boolean mismatching(){
-        if((Objects.isNull(getKey()) && ! Objects.isNull(getValue()))
-        || (Objects.isNull(getValue()) && ! Objects.isNull(getKey()))){
+        if((Objects.isNull(left) && ! Objects.isNull(right))
+        || (Objects.isNull(right) && ! Objects.isNull(left))){
             return true;
         }
-        return !encoder.encode(getKey()).equals(encoder.encode(getValue()));
+        return !encoder.encode(left).equals(encoder.encode(right));
     }
-
 }
